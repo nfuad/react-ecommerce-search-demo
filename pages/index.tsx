@@ -1,88 +1,98 @@
+import { isEqual } from 'lodash'
 import React from 'react'
-import Head from 'next/head'
-import Nav from '../components/nav'
+import PropTypes from 'prop-types'
+import { withRouter } from 'next/router'
+import qs from 'qs'
+import algoliasearch from 'algoliasearch/lite'
+import { findResultsState } from 'react-instantsearch-dom/server'
+import { Head, App } from '../components'
 
-const Home = () => (
-  <div>
-    <Head>
-      <title>Home</title>
-      <link rel="icon" href="/favicon.ico" />
-    </Head>
-
-    <Nav />
-
-    <div className="hero">
-      <h1 className="title">Welcome to Next.js!</h1>
-      <p className="description">
-        To get started, edit <code>pages/index.js</code> and save to reload.
-      </p>
-
-      <div className="row">
-        <a href="https://nextjs.org/docs" className="card">
-          <h3>Documentation &rarr;</h3>
-          <p>Learn more about Next.js in the documentation.</p>
-        </a>
-        <a href="https://nextjs.org/learn" className="card">
-          <h3>Next.js Learn &rarr;</h3>
-          <p>Learn about Next.js by following an interactive tutorial!</p>
-        </a>
-        <a
-          href="https://github.com/zeit/next.js/tree/master/examples"
-          className="card"
-        >
-          <h3>Examples &rarr;</h3>
-          <p>Find other example boilerplates on the Next.js GitHub.</p>
-        </a>
-      </div>
-    </div>
-
-    <style jsx>{`
-      .hero {
-        width: 100%;
-        color: #333;
-      }
-      .title {
-        margin: 0;
-        width: 100%;
-        padding-top: 80px;
-        line-height: 1.15;
-        font-size: 48px;
-      }
-      .title,
-      .description {
-        text-align: center;
-      }
-      .row {
-        max-width: 880px;
-        margin: 80px auto 40px;
-        display: flex;
-        flex-direction: row;
-        justify-content: space-around;
-      }
-      .card {
-        padding: 18px 18px 24px;
-        width: 220px;
-        text-align: left;
-        text-decoration: none;
-        color: #434343;
-        border: 1px solid #9b9b9b;
-      }
-      .card:hover {
-        border-color: #067df7;
-      }
-      .card h3 {
-        margin: 0;
-        color: #067df7;
-        font-size: 18px;
-      }
-      .card p {
-        margin: 0;
-        padding: 12px 0 0;
-        font-size: 13px;
-        color: #333;
-      }
-    `}</style>
-  </div>
+const searchClient = algoliasearch(
+  'latency',
+  '6be0576ff61c053d5f9a3225e2a90f76'
 )
 
-export default Home
+const updateAfter = 700
+
+const createURL = (state) => `?${qs.stringify(state)}`
+
+const pathToSearchState = (path) =>
+  path.includes('?') ? qs.parse(path.substring(path.indexOf('?') + 1)) : {}
+
+const searchStateToURL = (searchState) =>
+  searchState ? `${window.location.pathname}?${qs.stringify(searchState)}` : ''
+
+const DEFAULT_PROPS = {
+  searchClient,
+  indexName: 'instant_search'
+}
+
+class Page extends React.Component<any, any> {
+  static propTypes = {
+    router: PropTypes.object.isRequired,
+    resultsState: PropTypes.object,
+    searchState: PropTypes.object
+  }
+
+  state = {
+    searchState: this.props.searchState,
+    lastRouter: this.props.router
+  }
+
+  static async getInitialProps({ asPath }) {
+    const searchState = pathToSearchState(asPath)
+    const resultsState = await findResultsState(App, {
+      ...DEFAULT_PROPS,
+      searchState
+    })
+
+    return {
+      resultsState,
+      searchState
+    }
+  }
+
+  static getDerivedStateFromProps(props, state) {
+    if (!isEqual(state.lastRouter, props.router)) {
+      return {
+        searchState: pathToSearchState(props.router.asPath),
+        lastRouter: props.router
+      }
+    }
+
+    return null
+  }
+
+  onSearchStateChange = (searchState) => {
+    // @ts-ignore
+    clearTimeout(this.debouncedSetState)
+
+    // @ts-ignore
+    this.debouncedSetState = setTimeout(() => {
+      const href = searchStateToURL(searchState)
+
+      this.props.router.push(href, href, {
+        shallow: true
+      })
+    }, updateAfter)
+
+    this.setState({ searchState })
+  }
+
+  render() {
+    return (
+      <div>
+        <Head title="Home" />
+        <App
+          {...DEFAULT_PROPS}
+          searchState={this.state.searchState}
+          resultsState={this.props.resultsState}
+          onSearchStateChange={this.onSearchStateChange}
+          createURL={createURL}
+        />
+      </div>
+    )
+  }
+}
+
+export default withRouter(Page)
